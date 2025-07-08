@@ -36,6 +36,7 @@ private:
     // Face detection and recognition
     CascadeClassifier face_cascade;
     vector<Mat> saved_faces;
+    vector<string> saved_names;
     bool has_saved_faces;
 
     // UI Elements
@@ -131,6 +132,7 @@ public:
 
         for (int i = 0; i < count; i++)
         {
+            // Load face data
             int rows, cols, type;
             file.read(reinterpret_cast<char *>(&rows), sizeof(rows));
             file.read(reinterpret_cast<char *>(&cols), sizeof(cols));
@@ -139,7 +141,15 @@ public:
             Mat face(rows, cols, type);
             file.read(reinterpret_cast<char *>(face.data), face.total() * face.elemSize());
 
+            // Load name data
+            int name_length;
+            file.read(reinterpret_cast<char *>(&name_length), sizeof(name_length));
+
+            string name(name_length, ' ');
+            file.read(&name[0], name_length);
+
             saved_faces.push_back(face);
+            saved_names.push_back(name);
         }
 
         file.close();
@@ -148,6 +158,10 @@ public:
         {
             has_saved_faces = true;
             cout << "Kaydedilen " << saved_faces.size() << " yuz yuklendi!" << endl;
+            for (size_t i = 0; i < saved_names.size(); i++)
+            {
+                cout << "  - " << saved_names[i] << endl;
+            }
         }
     }
 
@@ -160,8 +174,12 @@ public:
         int count = saved_faces.size();
         file.write(reinterpret_cast<const char *>(&count), sizeof(count));
 
-        for (const Mat &face : saved_faces)
+        for (size_t i = 0; i < saved_faces.size(); i++)
         {
+            const Mat &face = saved_faces[i];
+            const string &name = saved_names[i];
+
+            // Save face data
             int rows = face.rows;
             int cols = face.cols;
             int type = face.type();
@@ -170,6 +188,11 @@ public:
             file.write(reinterpret_cast<const char *>(&cols), sizeof(cols));
             file.write(reinterpret_cast<const char *>(&type), sizeof(type));
             file.write(reinterpret_cast<const char *>(face.data), face.total() * face.elemSize());
+
+            // Save name data
+            int name_length = name.length();
+            file.write(reinterpret_cast<const char *>(&name_length), sizeof(name_length));
+            file.write(name.c_str(), name_length);
         }
 
         file.close();
@@ -197,6 +220,17 @@ public:
             return;
         }
 
+        // Get name from user
+        cout << "\nYuz kaydediliyor..." << endl;
+        cout << "Isim girin (bos birakabilirsiniz): ";
+        string name;
+        getline(cin, name);
+
+        if (name.empty())
+        {
+            name = "Kisi_" + to_string(saved_faces.size() + 1);
+        }
+
         // Save the first detected face
         Rect face_rect = detected_faces[0];
         Mat face_roi = gray_frame(face_rect);
@@ -206,17 +240,19 @@ public:
         resize(face_roi, resized_face, Size(100, 100));
 
         saved_faces.push_back(resized_face.clone());
+        saved_names.push_back(name);
         has_saved_faces = true;
 
         // Save to file
         saveFacesToFile();
 
-        cout << "Yuz kaydedildi! Toplam kaydedilen yuz: " << saved_faces.size() << endl;
+        cout << "Yuz kaydedildi: " << name << " | Toplam: " << saved_faces.size() << endl;
     }
 
     void clearSavedFaces()
     {
         saved_faces.clear();
+        saved_names.clear();
         has_saved_faces = false;
 
         // Delete the file
@@ -254,10 +290,12 @@ public:
 
                 // Simple template matching with saved faces
                 double best_match = 0.0;
-                for (const Mat &saved_face : saved_faces)
+                int best_match_index = -1;
+
+                for (size_t j = 0; j < saved_faces.size(); j++)
                 {
                     Mat result;
-                    matchTemplate(resized_face, saved_face, result, TM_CCOEFF_NORMED);
+                    matchTemplate(resized_face, saved_faces[j], result, TM_CCOEFF_NORMED);
 
                     double minVal, maxVal;
                     minMaxLoc(result, &minVal, &maxVal);
@@ -265,13 +303,14 @@ public:
                     if (maxVal > best_match)
                     {
                         best_match = maxVal;
+                        best_match_index = j;
                     }
                 }
 
-                if (best_match > 0.6) // Threshold for recognition
+                if (best_match > 0.6 && best_match_index >= 0) // Threshold for recognition
                 {
                     color = Scalar(0, 0, 255); // Red for known person
-                    label = "Taninan Kisi";
+                    label = saved_names[best_match_index];
                 }
             }
 
@@ -291,7 +330,7 @@ public:
         cout << "  G - Grayscale toggle" << endl;
         cout << "  ESC - Exit" << endl;
         cout << "  Space - Save frame" << endl;
-        cout << "  Yuz Kaydet butonu - Gorunen yuzu kaydet" << endl;
+        cout << "  Yuz Kaydet butonu - Gorunen yuzu isimle kaydet" << endl;
         cout << "  Temizle butonu - Kaydedilen yuzleri temizle" << endl;
 
         Mat frame, display_frame;
